@@ -33,6 +33,9 @@
  * 1.0.2.0 - 06.12.2020
  *   option to use positive logic outputs instead of open collector outputs
  *
+ * 1.0.3.0 - 29.12.2020
+ *   support extended startup delay with power saving
+ *
  */
 
 #include <avr/power.h>
@@ -41,7 +44,7 @@
 #include <limits.h>
 
 
-#define VERSION "1.0.2.0"     // 12.12.2020
+#define VERSION "1.0.3.0"     // 29.12.2020
 
 
 /** HARDWARE CONFIGURATION ATtiny 85 **/
@@ -168,7 +171,7 @@ public:
    * configure the Projector Screen Trigger
    *
    * @param hysteresis [W] hysteresis between "on" an "off" power level, 1 .. 100 (.. 223 W)
-   * @param startupDelay [ms] delay between ATtiny start and start of input evaluation, 17 .. 4177 ms
+   * @param startupDelay [ms] delay between ATtiny start and start of input evaluation, 64 .. 65472 ms
    * @param pulseDelay [ms] delay between detection and action, higher values improve stability, 17 .. 4177 ms
    * @param pulseDuration [ms] duration of output pulse, 17 .. 4177 ms
    */
@@ -227,7 +230,7 @@ public:
   void check()
   {
     // power management
-    powerSave((triggerState == MONITORING || triggerState == CHANGED)? WDTO_60MS : 0, triggerState != MONITORING);
+    powerSave((triggerState == STARTUP || triggerState == MONITORING || triggerState == CHANGED)? WDTO_60MS : 0, !(triggerState == STARTUP || triggerState == MONITORING));
 
     // trigger state management
     switch (triggerState)
@@ -321,11 +324,6 @@ public:
 
     switch (triggerState)
     {
-      case STARTUP:
-        // end of startup delay
-        triggerState = MONITORING;
-        break;
-
       case CHANGED:
         // start of pulse, start pulse duration timer
         screenState = screenState == UP? DOWN : UP;
@@ -375,6 +373,27 @@ public:
     }
   }
 
+  /**
+   * watchdog event handler for:
+   * <ul>
+   *   <li>startup delay</li>
+   * </ul>
+   */
+  void watchdogEvent()
+  {
+    switch (triggerState)
+    {
+      case STARTUP:
+        watchdogTicks++;
+        if (watchdogTicks >= startupDelay)
+        {
+          // end of startup delay
+          triggerState = MONITORING;
+        }
+        break;
+    }
+  }
+
   TriggerState getTriggerState()
   {
     return triggerState;
@@ -385,7 +404,7 @@ private:
    * clip input value to the range 1 .. 255
    * for timer compare
    */
-  static byte clip(unsigned long i)
+  static byte clipByte(unsigned long i)
   {
     if (i <= 2U)
     {
@@ -399,6 +418,28 @@ private:
     {
       return i--;
     }
+  }
+
+  /**
+   * clip input value to the range 1 .. USHORT_MAX
+   * for watchdog tick compare
+   */
+  static unsigned short clipUShort(float f)
+  {
+    unsigned short u;
+    if (f < 1)
+    {
+      u = 1U;
+    }
+    else if (f-0.5f > USHRT_MAX)
+    {
+      u = USHRT_MAX;
+    }
+    else
+    {
+      u = round(f);
+    }
+    return u;
   }
 
   /**
@@ -416,9 +457,10 @@ private:
     TCCR1 |= (1<<CS13) | (1<<CS12) | (1<<CS11) | (1<<CS10); // set 1 MHz clock prescaler to 16384
     TIMSK &= ~((1<<OCIE1A) | (1<<OCIE1B) | (1<<TOIE1));     // disable timer1 interrupts
 
-    this->startupDelay = clip(1000UL*startupDelay/16384U);
-    this->pulseDelay = clip(1000UL*pulseDelay/16384U);
-    this->pulseDuration = clip(1000UL*pulseDuration/16384U);
+    this->pulseDelay = clipByte(1000UL*pulseDelay/16384U);
+    this->pulseDuration = clipByte(1000UL*pulseDuration/16384U);
+
+    this->startupDelay = clipUShort(startupDelay/64.0f);    // 64 ms watchodg period
   }
 
   static void startTimer(byte ticks)
@@ -487,9 +529,11 @@ private:
   volatile ScreenState screenState = UNKNOWN;
 
   byte hysteresis = 0;    // [bits]
-  byte startupDelay = 0;  // [timer ticks]
   byte pulseDelay = 0;    // [timer ticks]
   byte pulseDuration = 0; // [timer ticks]
+  unsigned short startupDelay = 0; // [watchdog ticks]
+
+  unsigned short watchdogTicks = 0;
 
   unsigned short vRef = 0;   // [bits]
   unsigned short vSense = 0; // [bits]
@@ -508,7 +552,7 @@ void setup()
 #endif
 
   // configure projector screen trigger: hysteresis [W], startup delay [ms], input filter [ms], pulse duration [ms]
-  projectionScreenTrigger.setup(34, 2000, 2000, 500);
+  projectionScreenTrigger.setup(34, 10000, 2000, 500);
 }
 
 /**
@@ -542,4 +586,5 @@ ISR(TIMER1_COMPA_vect)
  */
 ISR(WDT_vect)
 {
+  projectionScreenTrigger.watchdogEvent();
 }
