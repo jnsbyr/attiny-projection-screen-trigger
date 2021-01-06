@@ -30,6 +30,9 @@
  * 1.0.1.0 - 06.12.2020
  *   power saving while monitoring analog inputs
  *
+ * 1.0.2.0 - 06.12.2020
+ *   option to use positive logic outputs instead of open collector outputs
+ *
  */
 
 #include <avr/power.h>
@@ -38,7 +41,7 @@
 #include <limits.h>
 
 
-#define VERSION "1.0.1.0"     // 12.12.2020
+#define VERSION "1.0.2.0"     // 12.12.2020
 
 
 /** HARDWARE CONFIGURATION ATtiny 85 **/
@@ -52,6 +55,8 @@
 #define PIN_DOWN      PIN_PB4 // Pin 3 OUT, OC1B (A2)
 #define PIN_DEBUG_OUT PIN_PB0 // Pin 5 OUT, (A0)
 //#define PIN_DEBUG_IN  PIN_PB5 // Pin 1 IN, uncomment for serial debugging
+
+#define OUTPUT_MODE_OC        // comment out for positive logic outputs, uncomment for open collector outputs
 
 // circuit dependendend conversion factor: (ADC Vref * transformer ratio * AC voltage) / (burden resistance * ADC bits)
 static const float WATTS_PER_ADC_BIT = (2.56f * 500 * 230)/(100UL * 1024);
@@ -172,10 +177,15 @@ public:
     this->hysteresis = ceil(((float)hysteresis)/(WATTS_PER_ADC_BIT*2));
 
     // configure digital pins
+#ifndef OUTPUT_MODE_OC
     pinMode(PIN_UP, OUTPUT);
     digitalWrite(PIN_UP, LOW);
     pinMode(PIN_DOWN, OUTPUT);
     digitalWrite(PIN_DOWN, LOW);
+#else
+    pinMode(PIN_UP, INPUT);
+    pinMode(PIN_DOWN, INPUT);
+#endif
 
 #ifndef PIN_DEBUG_IN
     pinMode(PIN_DEBUG_OUT, OUTPUT);
@@ -319,6 +329,7 @@ public:
       case CHANGED:
         // start of pulse, start pulse duration timer
         screenState = screenState == UP? DOWN : UP;
+#ifndef OUTPUT_MODE_OC
         if (screenState == UP)
         {
           digitalWrite(PIN_DOWN, LOW);
@@ -329,6 +340,20 @@ public:
           digitalWrite(PIN_UP, LOW);
           digitalWrite(PIN_DOWN, HIGH);
         }
+#else
+        if (screenState == UP)
+        {
+          pinMode(PIN_DOWN, INPUT);
+          digitalWrite(PIN_UP, LOW);
+          pinMode(PIN_UP, OUTPUT);
+        }
+        else
+        {
+          pinMode(PIN_UP, INPUT);
+          digitalWrite(PIN_DOWN, LOW);
+          pinMode(PIN_DOWN, OUTPUT);
+        }
+#endif
         triggerState = PULSE;
 #ifdef PIN_DEBUG_IN
         debugSerial.println(" P");
@@ -338,8 +363,13 @@ public:
 
       case PULSE:
         // end of pulse
+#ifndef OUTPUT_MODE_OC
         digitalWrite(PIN_UP, LOW);
         digitalWrite(PIN_DOWN, LOW);
+#else
+        pinMode(PIN_UP, INPUT);
+        pinMode(PIN_DOWN, INPUT);
+#endif
         triggerState = MONITORING;
         break;
     }
