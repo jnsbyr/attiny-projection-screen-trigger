@@ -21,6 +21,15 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
+ *
+ * CHANGES:
+ *
+ * 1.0.0.0 - 05.12.2020
+ *   initial release
+ *
+ * 1.0.1.0 - 06.12.2020
+ *   power saving while monitoring analog inputs
+ *
  */
 
 #include <avr/power.h>
@@ -29,14 +38,14 @@
 #include <limits.h>
 
 
-#define VERSION "1.0.0.0"     // 05.12.2020
+#define VERSION "1.0.1.0"     // 12.12.2020
 
 
 /** HARDWARE CONFIGURATION ATtiny 85 **/
 
 // analog inputs
-#define PIN_VREF      A1      // Pin 7, IN, A1, (PIN_PB2)
-#define PIN_VSENSE    A3      // Pin 2, IN, A3, (PIN_PB3)
+#define PIN_VREF      A1      // Pin 7, IN, A1 (PIN_PB2)
+#define PIN_VSENSE    A3      // Pin 2, IN, A3 (PIN_PB3)
 
 // digital outputs
 #define PIN_UP        PIN_PB1 // Pin 6 OUT, OC1A
@@ -47,9 +56,6 @@
 // circuit dependendend conversion factor: (ADC Vref * transformer ratio * AC voltage) / (burden resistance * ADC bits)
 static const float WATTS_PER_ADC_BIT = (2.56f * 500 * 230)/(100UL * 1024);
 
-// state of run output pin (it is faster than reading back the current pin state)
-bool alive = false;
-
 
 /** DEBUGGING **/
 
@@ -59,6 +65,9 @@ bool alive = false;
 #else
   // unused pins
   #define PIN_UNUSED PIN_PB5  // Pin 1
+
+  // state of run output pin (it is faster than reading back the current pin state)
+  bool alive = false;
 #endif
 
 
@@ -74,7 +83,7 @@ bool alive = false;
  *
  * Delays and pulses are created using timer interrupts (non-blocking wait).
  *
- * Input monitoring continues in delay phase. Pulse is canceled if input is
+ * Input monitoring continues in delay phase. Pulse is cancelled if input is
  * unstable.
  *
  * As long as the analog inputs are monitored the CPU is powered down
@@ -120,9 +129,9 @@ bool alive = false;
  * Pmin,adc = Pmax / 1024 = 2.9 W
  *
  * Using a current transformer as sensor allows mechanically non invasive
- * and electically isolated monitoring of the projector current.
+ * and electrically isolated monitoring of the projector current.
  *
- * The range for the trigger level is determind by the value of the burden
+ * The range for the trigger level is determined by the value of the burden
  * resistor. Choosing a higher resistance limits the trigger range but improves
  * the sensitivity and stability for smaller loads. A resistor of 100 Ohms
  * results in a resolution of 3 W and the minimum load that can be detected
@@ -180,7 +189,7 @@ public:
     analogReference(INTERNAL2V56 - 1); // DEFAULT Vref = Vcc = 5 V (see wiring.h)
 
     // power down USI
-    PRR = (1<<PRUSI);
+    power_usi_disable();
 
     // configure timer
     setupTimer(startupDelay, pulseDelay, pulseDuration);
@@ -196,11 +205,21 @@ public:
 
   /**
    * sample analog inputs and check trigger level
-   * will be excuted at 660 Hz
-   * ATtiny 85 current consumption is 1.6 mA @ 4.8V
+   *
+   * Notes:
+   * - excutes at 8 Hz consuming 0.08 mA @ 4.8V while monitoring analog inputs
+   *   and 0.6 mA @ 4.8V when pulsing reducing average power consumption
+   *   below 40 µW
+   * - would be excuted at 660 Hz without explicit delay constantly consuming
+   *   1.6 mA @ 4.8V or 8 mW without using sleep modes
+   *
    */
   void check()
   {
+    // power management
+    powerSave((triggerState == MONITORING || triggerState == CHANGED)? WDTO_60MS : 0, triggerState != MONITORING);
+
+    // trigger state management
     switch (triggerState)
     {
       case MONITORING:
@@ -208,12 +227,17 @@ public:
       {
         // read analog inputs (discard 1st sample to increase accuracy after changing ADC mux)
         analogRead(PIN_VREF);
-        vRef = (3*vRef + analogRead(PIN_VREF))/4;
+        vRef = (3*vRef + (unsigned short)analogRead(PIN_VREF))/4;
         analogRead(PIN_VSENSE);
-        vSense = (vSense + analogRead(PIN_VSENSE))/2;
+        vSense = (vSense + (unsigned short)analogRead(PIN_VSENSE))/2;
+
+        // prevent unsigned underflow
+        if (vRef < hysteresis)
+        {
+          vRef = hysteresis;
+        }
 
 #ifdef PIN_DEBUG_IN
-        delay(100);
         debugSerial.print("R=");
         debugSerial.print(vRef);
         debugSerial.print(" V=");
@@ -221,8 +245,8 @@ public:
 #endif
 
         // compare analog inputs
-        bool higher = vSense > (vRef + (int)hysteresis);
-        bool lower = vSense < (vRef - (int)hysteresis);
+        bool higher = vSense > (vRef + hysteresis);
+        bool lower = vSense < (vRef - hysteresis);
 
         // check state
         noInterrupts();
@@ -297,8 +321,8 @@ public:
         screenState = screenState == UP? DOWN : UP;
         if (screenState == UP)
         {
-          digitalWrite(PIN_UP, HIGH);
           digitalWrite(PIN_DOWN, LOW);
+          digitalWrite(PIN_UP, HIGH);
         }
         else
         {
@@ -307,7 +331,7 @@ public:
         }
         triggerState = PULSE;
 #ifdef PIN_DEBUG_IN
-        debugSerial.println("P");
+        debugSerial.println(" P");
 #endif
         startTimer(pulseDuration);
         break;
@@ -331,7 +355,7 @@ private:
    * clip input value to the range 1 .. 255
    * for timer compare
    */
-  unsigned short clip(unsigned long i)
+  static byte clip(unsigned long i)
   {
     if (i <= 2U)
     {
@@ -355,7 +379,7 @@ private:
   void setupTimer(unsigned short startupDelay, unsigned short pulseDelay, unsigned short pulseDuration)
   {
     // power down timer0
-    PRR |= (1<<PRTIM0);
+    power_timer0_disable();
 
     // configure timer1 to 61 Hz with output compare match A interrupt -> 0 .. 4.2 s (16.4 ms)
     TCCR1 = 0;                                              // clear timer1
@@ -367,29 +391,77 @@ private:
     this->pulseDuration = clip(1000UL*pulseDuration/16384U);
   }
 
-  void startTimer(unsigned int ticks)
+  static void startTimer(byte ticks)
   {
     TCNT1 = 0;
     OCR1A = ticks;
-    TIFR |= (1<<OCF1A);   // clear pending ouput compare match A interrupt
-    TIMSK |= (1<<OCIE1A); // enable ouput compare match A interrupt
+    TIFR |= (1<<OCF1A);   // clear pending output compare match A interrupt
+    TIMSK |= (1<<OCIE1A); // enable output compare match A interrupt
   }
 
-  void stopTimer()
+  static void stopTimer()
   {
-    TIMSK &= ~(1<<OCIE1A); // disable ouput compare match A interrupt
+    TIMSK &= ~(1<<OCIE1A); // disable output compare match A interrupt
+  }
+
+  /**
+   * power down ADC and timer1 units and put CPU to sleep until
+   * wakeup by WDT or timer1 occurs
+   *
+   * @param watchdogTimeout if not zero use WDT wakeup, use constants from wdt.h excluding WDTO_15MS, e.g. WDTO_60MS
+   * @param timer1Wakeup keep timer1 running
+   *
+   * Note: if called with the parameter combination (0, false) or (0, true) and timer 1 disabled a reset is required for wakeup
+   *
+   */
+  static void powerSave(byte watchdogTimeout, bool timer1Wakeup)
+  {
+    // shutdown
+    byte adcsra = ADCSRA;                    // save ADC state
+    ADCSRA = 0;                              // disable ADC
+    if (timer1Wakeup)
+    {
+      set_sleep_mode(SLEEP_MODE_IDLE);
+      power_adc_disable();
+    }
+    else
+    {
+      set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+      power_all_disable();
+    }
+    noInterrupts();
+    if (watchdogTimeout > WDTO_15MS)
+    {
+      MCUSR &= ~(1 << WDRF);                           // clear watchdog reset flag
+      WDTCR = (1<<WDIE) | (1<<WDCE) | watchdogTimeout; // enable watchdog interrupt after 64 ms
+    }
+    sleep_enable();
+    interrupts();
+
+    // put CPU to sleep wait for WDT wakeup
+    sleep_cpu();
+
+    // startup
+    sleep_disable();
+    if (watchdogTimeout > WDTO_15MS)
+    {
+      wdt_disable();
+    }
+    power_adc_enable();
+    power_timer1_enable();
+    ADCSRA = adcsra;                         // restore ADC state
   }
 
 private:
   volatile TriggerState triggerState = STARTUP;
   volatile ScreenState screenState = UNKNOWN;
 
-  unsigned short hysteresis = 0;    // [bits]
-  unsigned short startupDelay = 0;  // [timer ticks]
-  unsigned short pulseDelay = 0;    // [timer ticks]
-  unsigned short pulseDuration = 0; // [timer ticks]
+  byte hysteresis = 0;    // [bits]
+  byte startupDelay = 0;  // [timer ticks]
+  byte pulseDelay = 0;    // [timer ticks]
+  byte pulseDuration = 0; // [timer ticks]
 
-  unsigned short vRef = 0;  // [bits]
+  unsigned short vRef = 0;   // [bits]
   unsigned short vSense = 0; // [bits]
 
 } projectionScreenTrigger;
@@ -405,8 +477,8 @@ void setup()
   debugSerial.println("Projection Screen Trigger ...");
 #endif
 
-  // configure projection screen trigger: hysteresis [W], startup delay [ms], input filter [ms], pulse duration [ms]
-  projectionScreenTrigger.setup(10, 2000, 2000, 500);
+  // configure projector screen trigger: hysteresis [W], startup delay [ms], input filter [ms], pulse duration [ms]
+  projectionScreenTrigger.setup(34, 2000, 2000, 500);
 }
 
 /**
@@ -433,4 +505,11 @@ void loop()
 ISR(TIMER1_COMPA_vect)
 {
   projectionScreenTrigger.timerEvent();
+}
+
+/**
+ * ATtiny interrupt service routine for watchdog
+ */
+ISR(WDT_vect)
+{
 }
