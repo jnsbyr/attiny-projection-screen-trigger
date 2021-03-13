@@ -1,18 +1,37 @@
 # ATtiny85 Projection Screen Trigger - Automatically control a motorized projection screen ![GitHub release](https://img.shields.io/github/v/release/jnsbyr/attiny-projection-screen-trigger?include_prereleases)
 
-After looking at current commercial solutions to lower and raise a projection screen automatically I was astonished by the typical price tag for such a simple function. All it takes is to automatically press the down button when the projector is turned on and the up button when the projector is turned off. The most complicated part is to know when the projector is on or off.
+
+### Table of contents
+
+[1. Introduction](#introduction)  
+[2. Firmware](#firmware)  
+[3. Schematic](#schematic)  
+[4. PCB](#pcb)  
+[5. Wiring](#wiring)  
+[6. Extras](#extras)  
+[7. Alternatives](#alternatives)  
+[8. Conclusion](#conclusion)  
+[9. Contributing](#contributing)  
+[10. Licenses and Credits](#licenses-and-credits)
+
+
+## Introduction
+
+After looking at current commercial solutions to lower and raise a projection screen automatically I was astonished by the typical price tag for such a simple function. All it takes is to automatically press the down button when the projector is turned on and the up button when the projector is turned off. The most complicated part is to know when the projector is on or off. This project describes a possible solution. The concept of the code and the circuit are more or less straight forward and only a little bit more demanding than the a blinking LED.
+
+### Requirements
 
 To raise the bar at least a little bit, the following additional aspects came to mind:
 
-- no direct interfacing with mains power
+- no connection to the mains electric power
 - no additional power supply
 - lowest possible power consumption
 
-##### No direct interfacing with mains power
+#### No connection to the mains electric power
 
 This is easy - it just takes a current transformer, converting the current on the secondary side to a voltage using a resistor, rectifying the AC voltage using a diode, limiting possible over voltage using an TVS diode and add a RC low pass filter to reduce the AC ripples - 6 components total for a galvanically isolated mains current sensor. The current transformer is placed around the line wire of an extension cord that powers the projector.
 
-##### No additional power supply
+#### No additional power supply
 
 For this you need to be lucky. The control unit of a Celexon Electric Professional Plus Screen works internally with 5 V and has an unused welding hole in the PCB where it can be tapped:
 
@@ -20,17 +39,16 @@ For this you need to be lucky. The control unit of a Celexon Electric Profession
 
 Additionally the control unit has screw terminals for "up", "down" and "stop" that can be operated with a relais or with an open collector output. The case of the control unit has enough spare room to hold all components of the projection screen trigger.
 
-##### Lowest possible power consumption
+#### Lowest possible power consumption
 
 Saving power is not a strict requirement to make this project work but it is always a good idea - and an ATtiny85 is the perfect playground for power saving experiments. For a projection screen trigger you need to monitor the output voltage of the current sensor. If it gets higher than a given threshold you need to pulse the "down" output, if it gets lower the "up" output. This could be done with some analog components but the ATtiny85 does it all at once and still has nothing to do. The net result is a standby power consumption of 40 µW so that tapping into the power supply of another circuit will do no harm. Alternatively it would run on a 1500 mAh battery for 3 months.
 
-##### Price
+### Price
 
 The components for this project cost less than 20 EUR, discounting the assembly work and excluding the ISP, with the current transformer being the most expensive part.
 
----
 
-### Firmware
+## Firmware
 
 The firmware for the ATtiny85 could be created with [Microchip Studio](https://www.microchip.com/en-us/development-tools-tools-and-software/microchip-studio-for-avr-and-sam-devices). But if you already have an [Arduino IDE](https://www.arduino.cc/en/software/) up and running this is the better choice for a small project such as this. Just add "[ATtinyCore](https://github.com/SpenceKonde/ATTinyCore)" using the Board Manager and you can start. The required board settings are described at the beginning of the INO file.
 
@@ -45,9 +63,9 @@ Uploading the firmware to the ATtiny85 can be a bit tricky. If you do not have a
  There are many tutorials around that cover this subject. You might start at [Adrduino.cc](https://create.arduino.cc/projecthub/arjun/programming-attiny85-with-arduino-uno-afb829) or [ATtinyCore](https://github.com/SpenceKonde/ATTinyCore/blob/master/Programming.md). Use the Arduino "Blink" example to test the ISP.
 
 
-### Schematic
+## Schematic
 
-The general function of the circuit has already been explained above. It is similar to a master slave power strip but with 2 major differences:
+The general function of the circuit has already been explained above. It is similar to a master/slave power strip but with 2 major differences:
 
 - the sense input is galvanically isolated
 - instead of a single stateful output there are 2 pulsed outputs
@@ -59,16 +77,16 @@ With RV1 you can change the trigger level without the need to change the program
 Additional infos regarding the dimensioning of the circuit can be found at the beginning of the INO file. If your mains voltage is not 230 V you should modify the constant `WATTS_PER_ADC_BIT` in the code and depending on your requirements also R2.
 
 
-### PCB
+## PCB
 
 For prototyping I typically start with a breadboard. Then, to get fast results, I skip the PCB design and use a perfboard with thread wire. This is a great advantage if further changes are needed or new ideas come up. In most cases the electrical and mechanical properties of the perfboard are more than good enough for continuous operation.
 
 ![Perfboard](assets/Perfboard.jpg "Perfboard")
 
 
-### Wiring
+## Wiring
 
-At this point a **WARNING** to all electronic enthusiasts. The main difference between a commercial product and this project is that here you need professional electrical skills to properly connect the components. Do not try this project on your own if you are no expert on this subject! Your try may **COST LIFES** if you make a mistake. You may only use this project **AT YOUR OWN RISK**. I will not assume any responsibility and I will not provide photos of a suitable assembly solution.
+Even though this circuit has connection to the mains electric power, at this point a **WARNING** to all electronic enthusiasts. The main difference between a commercial product and this project is that here you need professional electrical skills to properly connect the components. Do not try this project on your own if you are no expert on this subject! Your try may **COST LIFES** if you make a mistake. You may only use this project **AT YOUR OWN RISK**. I will not assume any responsibility and I will not provide photos of a suitable assembly solution.
 
 - Connect the 5 V DC power supply output to pins 1 (+5 V) and 4 (GND) of J1.
 
@@ -91,6 +109,32 @@ At this point a **WARNING** to all electronic enthusiasts. The main difference b
 - Check that a manual override of the projection screen motor direction via the control unit is still possible.
 
 
+## Extras
+
+Interested in another hardware hack? Maybe you have a projector and a TV and maybe you have a manual HDMI switch to select the output device. Then have a look at this [addon]("HDMI-Switch%20Upgrade.md") to the projection screen trigger that automatically operates the HDMI switch.
+
+
+## Alternatives
+
+If your projector has WiFi then there are other ways to detect if the projector is on or off without the need to attach a current transformer to the mains extension cord of the projector. Take an [ESP8266 microcontroller](https://www.espressif.com/en/products/socs/esp8266) instead of the ATtiny85 together with the [Arduino Core for ESP8266](https://github.com/esp8266/Arduino). Using WiFi or Ethernet methods you can scan for your projector MAC address or just ping it. With WiFi available you might even add other extras to the project like [MQTT](https://mqtt.org/) or a webserver to allow remote control. 
+
+Replacing the ATtin85 with an ESP8266 comes at a price though. It is not the price for components but the price for energy. A WiFi device needs almost 1 W to work compared to the 40 µW of the ATtiny85. The ESP8266 microcontroller has power saving modes that might be suitable to reduce the average power consumption somewhat but you will never get near the consumption of ATtiny85. And because of the peak consumption of the ESP8266 it is probably not a good idea to tap the power supply of the control unit of the projection screen because this might overtax or damage the circuit so you will need an extra power supply.
+
+
+## Conclusion
+
+Especially the combination of the Projection Screen Trigger with the [HDMI switch addon]("HDMI-Switch%20Upgrade.md") provides a combination of advantages you will not find with other solutions:
+
+- low price (around 25 EUR)
+- low environmental impact
+    - low power consumption (less than 2.5 mW)
+    - no EMR compared to WiFi and Bluetooth solutions
+- high reliability (wired, no line of sight required compared to IR solutions)
+- highly ergonomic (the power button of the projector simultaneously controls the projection screen and the HDMI switch)
+- independent of manufacturer and model of projector
+- compact circuit board (50x25x20 mm, excluding current transformer)
+
+
 ## Contributing
 
 In you want something clarified or improved you may raise an [issue](https://github.com/jnsbyr/attiny-projection-screen-trigger/issues).
@@ -98,7 +142,7 @@ In you want something clarified or improved you may raise an [issue](https://git
 
 ## Licenses and Credits
 
-#### Documentation, Photos and Schematic
+### Documentation, Photos and Schematic
 
 Copyright (c) 2020 [Jens B.](https://github.com/jnsbyr)
 
@@ -108,7 +152,7 @@ The schematic was created using [KiCad](https://kicad.org/).
 
 The badges in this document are provided by [img.shields.io](https://img.shields.io).
 
-#### Firmware
+### Firmware
 
 Copyright (c) 2020 [Jens B.](https://github.com/jnsbyr)
 

@@ -36,6 +36,9 @@
  * 1.0.3.0 - 29.12.2020
  *   support extended startup delay with power saving
  *
+ * 1.0.4.0 - 07.01.2021
+ *   repurpose pin 5 to report the trigger state
+ * 
  */
 
 #include <avr/power.h>
@@ -44,7 +47,7 @@
 #include <limits.h>
 
 
-#define VERSION "1.0.3.0"     // 29.12.2020
+#define VERSION "1.0.4.0"     // 07.01.2021
 
 
 /** HARDWARE CONFIGURATION ATtiny 85 **/
@@ -56,10 +59,11 @@
 // digital outputs
 #define PIN_UP        PIN_PB1 // Pin 6 OUT, OC1A
 #define PIN_DOWN      PIN_PB4 // Pin 3 OUT, OC1B (A2)
-#define PIN_DEBUG_OUT PIN_PB0 // Pin 5 OUT, (A0)
-//#define PIN_DEBUG_IN  PIN_PB5 // Pin 1 IN, uncomment for serial debugging
+#define PIN_OUT       PIN_PB0 // Pin 5 OUT, (A0)
+//#define PIN_DEBUG_IN  PIN_PB5 // Pin 1 IN, uncomment for serial debugging via PIN_OUT
 
-#define OUTPUT_MODE_OC        // comment out for positive logic outputs, uncomment for open collector outputs
+#define UP_DOWN_OC            // comment out for UP and DOWN outputs using positive logic, uncomment for open collector outputs
+#define OUT_STATE             // comment out for STATE output reporting main loop frequency instead of trigger state
 
 // circuit dependendend conversion factor: (ADC Vref * transformer ratio * AC voltage) / (burden resistance * ADC bits)
 static const float WATTS_PER_ADC_BIT = (2.56f * 500 * 230)/(100UL * 1024);
@@ -68,14 +72,13 @@ static const float WATTS_PER_ADC_BIT = (2.56f * 500 * 230)/(100UL * 1024);
 /** DEBUGGING **/
 
 #ifdef PIN_DEBUG_IN
-#include <SoftwareSerial.h>
-  SoftwareSerial debugSerial(PIN_DEBUG_IN, PIN_DEBUG_OUT);
+  #include <SoftwareSerial.h>
+  SoftwareSerial debugSerial(PIN_DEBUG_IN, PIN_OUT);
 #else
-  // unused pins
-  #define PIN_UNUSED PIN_PB5  // Pin 1
-
+  #ifndef OUT_STATE  
   // state of run output pin (it is faster than reading back the current pin state)
   bool alive = false;
+  #endif
 #endif
 
 
@@ -180,7 +183,7 @@ public:
     this->hysteresis = ceil(((float)hysteresis)/(WATTS_PER_ADC_BIT*2));
 
     // configure digital pins
-#ifndef OUTPUT_MODE_OC
+#ifndef UP_DOWN_OC
     pinMode(PIN_UP, OUTPUT);
     digitalWrite(PIN_UP, LOW);
     pinMode(PIN_DOWN, OUTPUT);
@@ -191,11 +194,8 @@ public:
 #endif
 
 #ifndef PIN_DEBUG_IN
-    pinMode(PIN_DEBUG_OUT, OUTPUT);
-    digitalWrite(PIN_DEBUG_OUT, LOW);
-
-    // configure unused digital pins
-    pinMode(PIN_UNUSED, INPUT_PULLUP);
+    pinMode(PIN_OUT, OUTPUT);
+    digitalWrite(PIN_OUT, LOW);
 #endif
 
     // configure analog pins
@@ -220,10 +220,10 @@ public:
    * sample analog inputs and check trigger level
    *
    * Notes:
-   * - excutes at 8 Hz consuming 0.08 mA @ 4.8V while monitoring analog inputs
+   * - executes at 8 Hz consuming 0.08 mA @ 4.8V while monitoring analog inputs
    *   and 0.6 mA @ 4.8V when pulsing reducing average power consumption
    *   below 40 µW
-   * - would be excuted at 660 Hz without explicit delay constantly consuming
+   * - would be executes at 660 Hz without explicit delay constantly consuming
    *   1.6 mA @ 4.8V or 8 mW without using sleep modes
    *
    */
@@ -274,7 +274,7 @@ public:
               // changed, define start delay timer
               if (screenState == UNKNOWN)
               {
-                // preset inital screen state at power up
+                // preset initial screen state at power up
                 screenState = higher? UP : DOWN;
               }
 #ifdef PIN_DEBUG_IN
@@ -327,7 +327,7 @@ public:
       case CHANGED:
         // start of pulse, start pulse duration timer
         screenState = screenState == UP? DOWN : UP;
-#ifndef OUTPUT_MODE_OC
+#ifndef UP_DOWN_OC
         if (screenState == UP)
         {
           digitalWrite(PIN_DOWN, LOW);
@@ -355,13 +355,17 @@ public:
         triggerState = PULSE;
 #ifdef PIN_DEBUG_IN
         debugSerial.println(" P");
+#else
+  #if defined(OUT_STATE)
+        digitalWrite(PIN_OUT, screenState == UP? LOW : HIGH);
+  #endif        
 #endif
         startTimer(pulseDuration);
         break;
 
       case PULSE:
         // end of pulse
-#ifndef OUTPUT_MODE_OC
+#ifndef UP_DOWN_OC
         digitalWrite(PIN_UP, LOW);
         digitalWrite(PIN_DOWN, LOW);
 #else
@@ -562,11 +566,12 @@ void loop()
 {
   projectionScreenTrigger.check();
 
-#ifndef PIN_DEBUG_IN
+#if !defined(PIN_DEBUG_IN) && !defined(OUT_STATE)
+  // toggle output pin to report loop frequency
   if (projectionScreenTrigger.getTriggerState() != ProjectionScreenTrigger::STARTUP)
   {
     alive = !alive;
-    digitalWrite(PIN_DEBUG_OUT, alive? HIGH : LOW);
+    digitalWrite(PIN_OUT, alive? HIGH : LOW);
   }
 #endif
 }
